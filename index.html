@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes,viewport-fit=cover">
 <title>Photo Overlay Studio</title>
 <meta name="description" content="Layer photos on top of each other with opacity, blend modes and faded edges, then save the result.">
 <meta name="theme-color" content="#E7EAED" media="(prefers-color-scheme: light)">
@@ -792,7 +792,8 @@ a.btn{text-decoration:none}
 
   /* ---------- boot ---------- */
   loadSamples();
-  document.addEventListener('gesturestart', e => e.preventDefault());
+  // Pinch on the photo canvas resizes the layer; pinch anywhere else zooms the page.
+  view.addEventListener('gesturestart', e => e.preventDefault());
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
     addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }

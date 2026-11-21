@@ -115,6 +115,11 @@ input[type=range]{width:100%;min-width:0;accent-color:var(--accent);margin:0;hei
 .actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .actions .btn{padding:6px 8px;font-size:.86rem}
 .empty-note{color:var(--muted);font-size:.88rem}
+.align{display:flex;flex-direction:column;gap:6px}
+.align>span{color:var(--muted);font-size:.86rem}
+.align-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.align-row .btn{padding:0;min-height:38px}
+.align-row svg{width:20px;height:20px}
 
 .note{background:var(--accent-soft);border-radius:8px;padding:10px 12px;font-size:.84rem;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .note .btn{min-height:32px;padding:4px 10px;font-size:.82rem}
@@ -248,6 +253,17 @@ a.btn{text-decoration:none}
               <option value="luminosity">Luminosity</option>
             </select>
           </label>
+          <div class="align">
+            <span>Align to canvas</span>
+            <div class="align-row">
+              <button type="button" class="btn" id="alL" title="Align left" aria-label="Align left"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 2v16"/><rect x="5" y="5" width="10" height="4" rx="1"/><rect x="5" y="11" width="6" height="4" rx="1"/></svg></button>
+              <button type="button" class="btn" id="alC" title="Align centre" aria-label="Align centre"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 2v16" stroke-dasharray="2 2"/><rect x="4" y="5" width="12" height="4" rx="1"/><rect x="6.5" y="11" width="7" height="4" rx="1"/></svg></button>
+              <button type="button" class="btn" id="alR" title="Align right" aria-label="Align right"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M17 2v16"/><rect x="5" y="5" width="10" height="4" rx="1"/><rect x="9" y="11" width="6" height="4" rx="1"/></svg></button>
+              <button type="button" class="btn" id="alT" title="Align top" aria-label="Align top"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 3h16"/><rect x="5" y="5" width="4" height="10" rx="1"/><rect x="11" y="5" width="4" height="6" rx="1"/></svg></button>
+              <button type="button" class="btn" id="alM" title="Align middle" aria-label="Align middle"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 10h16" stroke-dasharray="2 2"/><rect x="5" y="4" width="4" height="12" rx="1"/><rect x="11" y="6.5" width="4" height="7" rx="1"/></svg></button>
+              <button type="button" class="btn" id="alB" title="Align bottom" aria-label="Align bottom"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 17h16"/><rect x="5" y="5" width="4" height="10" rx="1"/><rect x="11" y="9" width="4" height="6" rx="1"/></svg></button>
+            </div>
+          </div>
           <div class="actions">
             <button type="button" class="btn" id="aFlip">Flip</button>
             <button type="button" class="btn" id="aCenter">Center</button>
@@ -386,6 +402,36 @@ a.btn{text-decoration:none}
     const r = L.rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
     return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([dx,dy]) => ({ x:L.x + dx*c - dy*s, y:L.y + dx*s + dy*c }));
   }
+  function bounds(L){
+    const c = corners(L), xs = c.map(p => p.x), ys = c.map(p => p.y);
+    const l = Math.min(...xs), r = Math.max(...xs), t = Math.min(...ys), b = Math.max(...ys);
+    return { l, r, t, b, cx:(l+r)/2, cy:(t+b)/2 };
+  }
+  // Smart guides (like PowerPoint): snap edges/centres to the canvas and to other layers.
+  let guides = [];
+  function snapMove(L){
+    guides = [];
+    const tol = 8 / kcss, B = bounds(L);
+    const tx = [0, S.doc.w/2, S.doc.w], ty = [0, S.doc.h/2, S.doc.h];
+    for (const O of S.layers){
+      if (O === L || !O.visible) continue;
+      const o = bounds(O); tx.push(o.l, o.cx, o.r); ty.push(o.t, o.cy, o.b);
+    }
+    const best = (mine, targets) => {
+      let hit = null;
+      for (const m of mine) for (const t of targets){
+        const d = t - m;
+        if (Math.abs(d) <= tol && (!hit || Math.abs(d) < Math.abs(hit.d) - 1e-6)) hit = { d, t };
+      }
+      return hit;
+    };
+    const hx = best([B.l, B.cx, B.r], tx), hy = best([B.t, B.cy, B.b], ty);
+    if (hx) L.x += hx.d;
+    if (hy) L.y += hy.d;
+    const N = bounds(L), eps = 0.5;
+    if (hx) for (const t of new Set(tx)) if ([N.l, N.cx, N.r].some(v => Math.abs(v - t) < eps)) guides.push({ v:true, at:t });
+    if (hy) for (const t of new Set(ty)) if ([N.t, N.cy, N.b].some(v => Math.abs(v - t) < eps)) guides.push({ v:false, at:t });
+  }
   function render(){
     rafId = 0;
     const s = view.width / S.doc.w;
@@ -403,6 +449,18 @@ a.btn{text-decoration:none}
         vctx.fillStyle = '#ffffff'; vctx.fillRect(p.x-hs/2, p.y-hs/2, hs, hs);
         vctx.lineWidth = 1.5*dpr; vctx.strokeStyle = cssVar('--sel') || '#0E9FB4'; vctx.strokeRect(p.x-hs/2, p.y-hs/2, hs, hs);
       }
+    }
+    if (guides.length){
+      vctx.setTransform(1,0,0,1,0,0);
+      vctx.save();
+      vctx.lineWidth = 1.25*dpr; vctx.strokeStyle = '#FF3B6B'; vctx.setLineDash([5*dpr, 4*dpr]);
+      for (const g of guides){
+        vctx.beginPath();
+        if (g.v){ const x = Math.round(g.at*s) + .5; vctx.moveTo(x, 0); vctx.lineTo(x, view.height); }
+        else { const y = Math.round(g.at*s) + .5; vctx.moveTo(0, y); vctx.lineTo(view.width, y); }
+        vctx.stroke();
+      }
+      vctx.restore();
     }
   }
   const req = () => { if (!rafId) rafId = requestAnimationFrame(render); };
@@ -621,6 +679,7 @@ a.btn{text-decoration:none}
     if (!gesture.pushed){ push(); gesture.pushed = true; }
     if (gesture.mode === 'move' && pts.size === 1){
       L.x = gesture.ox + (p.x - gesture.sx); L.y = gesture.oy + (p.y - gesture.sy);
+      if (e.altKey) guides = []; else snapMove(L);
     } else if (gesture.mode === 'pinch' && pts.size >= 2){
       const t = two();
       L.scale = clampScale(L, gesture.s0 * t.d / gesture.d0);
@@ -636,6 +695,7 @@ a.btn{text-decoration:none}
   function endPointer(e){
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
+    if (guides.length){ guides = []; req(); }
     if (gesture && gesture.mode === 'pinch' && pts.size === 1){
       const L = S.layers.find(l => l.id === gesture.id);
       if (L) beginMove(L, [...pts.values()][0]);
@@ -672,6 +732,12 @@ a.btn{text-decoration:none}
   const act = (id, fn) => $(id).addEventListener('click', () => { const L = cur(); if (!L) return; push(); fn(L); syncPanel(); renderList(); req(); });
   act('aFlip', L => { L.flip = !L.flip; });
   act('aCenter', L => { L.x = S.doc.w/2; L.y = S.doc.h/2; });
+  act('alL', L => { L.x -= bounds(L).l; });
+  act('alC', L => { L.x += S.doc.w/2 - bounds(L).cx; });
+  act('alR', L => { L.x += S.doc.w - bounds(L).r; });
+  act('alT', L => { L.y -= bounds(L).t; });
+  act('alM', L => { L.y += S.doc.h/2 - bounds(L).cy; });
+  act('alB', L => { L.y += S.doc.h - bounds(L).b; });
   act('aFit', L => fitLayer(L, 'fit'));
   act('aFill', L => fitLayer(L, 'fill'));
   act('aDup', L => {

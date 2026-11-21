@@ -226,6 +226,9 @@ a.btn{text-decoration:none}
           <div class="ctl"><label for="opacity">Opacity</label><input id="opacity" type="range" min="0" max="100" step="1"><output id="opacityOut">100%</output></div>
           <div class="ctl"><label for="size">Size</label><input id="size" type="range" min="2" max="300" step="1"><output id="sizeOut">60%</output></div>
           <div class="ctl"><label for="rotate">Rotation</label><input id="rotate" type="range" min="-180" max="180" step="1"><output id="rotateOut">0°</output></div>
+          <div class="ctl-row"><span>Lock rotation</span>
+            <div class="seg" id="lockSeg"><button type="button" data-lock="0" aria-pressed="true">Unlocked</button><button type="button" data-lock="1" aria-pressed="false">Locked</button></div>
+          </div>
           <div class="ctl"><label for="feather">Edge fade</label><input id="feather" type="range" min="0" max="100" step="1"><output id="featherOut">0</output></div>
           <div class="ctl-row"><span>Shape</span>
             <div class="seg" id="shapeSeg">
@@ -307,7 +310,7 @@ a.btn{text-decoration:none}
   const MAX_SIDE = 3000;
   const PRESETS = { sq:[1080,1080], portrait:[1080,1350], story:[1080,1920], land:[1920,1080] };
   const BLEND_NAMES = {'source-over':'Normal',multiply:'Multiply',screen:'Screen',overlay:'Overlay',darken:'Darken',lighten:'Lighten','color-dodge':'Colour dodge','color-burn':'Colour burn','hard-light':'Hard light','soft-light':'Soft light',difference:'Difference',exclusion:'Exclusion',hue:'Hue',saturation:'Saturation',color:'Colour',luminosity:'Luminosity'};
-  const PROPS = ['id','name','src','w','h','x','y','scale','rot','opacity','blend','flip','visible','shape','feather','sample'];
+  const PROPS = ['id','name','src','w','h','x','y','scale','rot','opacity','blend','flip','visible','shape','feather','sample','lockRot'];
 
   const S = { doc:{w:1080,h:1350}, bg:'#ffffff', preset:'base', fmt:'png', layers:[], sel:null };
   let uid = 1, hist = [], future = [], rafId = 0, kcss = 1, dpr = 1;
@@ -321,7 +324,7 @@ a.btn{text-decoration:none}
 
   function newLayer(src, name, extra){
     return Object.assign({ id:uid++, name, src, w:src.width, h:src.height, x:S.doc.w/2, y:S.doc.h/2, scale:1, rot:0,
-      opacity:1, blend:'source-over', flip:false, visible:true, shape:'rect', feather:0, sample:false, cache:null, cacheKey:'' }, extra || {});
+      opacity:1, blend:'source-over', flip:false, visible:true, shape:'rect', feather:0, sample:false, lockRot:false, cache:null, cacheKey:'' }, extra || {});
   }
   function fitLayer(L, mode){
     const a = S.doc.w / L.w, b = S.doc.h / L.h;
@@ -489,6 +492,8 @@ a.btn{text-decoration:none}
     const sizePct = Math.round(L.w * L.scale / S.doc.w * 100);
     $('opacity').value = Math.round(L.opacity * 100); $('opacityOut').textContent = Math.round(L.opacity*100) + '%';
     $('size').value = clamp(sizePct, 2, 300); $('sizeOut').textContent = sizePct + '%';
+    $('rotate').disabled = !!L.lockRot;
+    $('lockSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lock === (L.lockRot ? '1' : '0'))));
     $('rotate').value = Math.round(L.rot); $('rotateOut').textContent = Math.round(L.rot) + '°';
     $('feather').value = L.feather; $('featherOut').textContent = L.feather;
     $('blend').value = L.blend;
@@ -648,7 +653,9 @@ a.btn{text-decoration:none}
     const p = toDoc(e); pts.set(e.pointerId, p);
     if (pts.size === 1){
       const L = cur();
-      if (L && L.visible && nearHandle(L, p)){
+      const grabCorner = L && L.visible && nearHandle(L, p) &&
+        !(contains(L, p) && Math.hypot(p.x - L.x, p.y - L.y) < Math.min(...corners(L).map(c => Math.hypot(c.x - p.x, c.y - p.y))));
+      if (grabCorner){
         gesture = { mode:'handle', id:L.id, v0:{ x:p.x - L.x, y:p.y - L.y }, s0:L.scale, r0:L.rot, pushed:false };
       } else {
         const hit = (L && L.visible && contains(L, p)) ? L : hitTest(p);
@@ -683,12 +690,12 @@ a.btn{text-decoration:none}
     } else if (gesture.mode === 'pinch' && pts.size >= 2){
       const t = two();
       L.scale = clampScale(L, gesture.s0 * t.d / gesture.d0);
-      L.rot = normRot(gesture.r0 + (t.a - gesture.a0) * 180 / Math.PI);
+      if (!L.lockRot) L.rot = normRot(gesture.r0 + (t.a - gesture.a0) * 180 / Math.PI);
       L.x = gesture.x0 + (t.m.x - gesture.m0.x); L.y = gesture.y0 + (t.m.y - gesture.m0.y);
     } else if (gesture.mode === 'handle'){
       const v = { x:p.x - L.x, y:p.y - L.y };
       L.scale = clampScale(L, gesture.s0 * (Math.hypot(v.x, v.y) || 1) / (Math.hypot(gesture.v0.x, gesture.v0.y) || 1));
-      L.rot = normRot(gesture.r0 + (Math.atan2(v.y, v.x) - Math.atan2(gesture.v0.y, gesture.v0.x)) * 180 / Math.PI);
+      if (!L.lockRot) L.rot = normRot(gesture.r0 + (Math.atan2(v.y, v.x) - Math.atan2(gesture.v0.y, gesture.v0.x)) * 180 / Math.PI);
     }
     syncPanel(); req();
   });
@@ -711,7 +718,7 @@ a.btn{text-decoration:none}
     e.preventDefault();
     if (!wheelT) push();
     clearTimeout(wheelT); wheelT = setTimeout(() => { wheelT = 0; renderList(); }, 350);
-    if (e.shiftKey || e.altKey) L.rot = normRot(L.rot + e.deltaY * 0.15);
+    if (e.shiftKey || e.altKey){ if (!L.lockRot) L.rot = normRot(L.rot + e.deltaY * 0.15); }
     else L.scale = clampScale(L, L.scale * Math.exp(-e.deltaY * 0.0015));
     syncPanel(); req();
   }, { passive:false });
@@ -725,7 +732,8 @@ a.btn{text-decoration:none}
   }
   slider('opacity', (L, v) => { L.opacity = v / 100; });
   slider('size', (L, v) => { L.scale = clampScale(L, v / 100 * S.doc.w / L.w); });
-  slider('rotate', (L, v) => { L.rot = v; });
+  slider('rotate', (L, v) => { if (!L.lockRot) L.rot = v; });
+  $('lockSeg').addEventListener('click', e => { const b = e.target.closest('button'); const L = cur(); if (!b || !L) return; const on = b.dataset.lock === '1'; if (!!L.lockRot === on) return; push(); L.lockRot = on; syncPanel(); renderList(); });
   slider('feather', (L, v) => { L.feather = v; });
   $('blend').addEventListener('change', e => { const L = cur(); if (!L) return; push(); L.blend = e.target.value; renderList(); req(); });
   $('shapeSeg').addEventListener('click', e => { const b = e.target.closest('button'); const L = cur(); if (!b || !L || L.shape === b.dataset.shape) return; push(); L.shape = b.dataset.shape; syncPanel(); req(); });
@@ -742,7 +750,7 @@ a.btn{text-decoration:none}
   act('aFill', L => fitLayer(L, 'fill'));
   act('aDup', L => {
     const i = S.layers.indexOf(L);
-    const D = newLayer(L.src, (L.name + ' copy').slice(0, 30), { x:L.x + S.doc.w*0.03, y:L.y + S.doc.h*0.03, scale:L.scale, rot:L.rot, opacity:L.opacity, blend:L.blend, flip:L.flip, shape:L.shape, feather:L.feather, sample:L.sample });
+    const D = newLayer(L.src, (L.name + ' copy').slice(0, 30), { x:L.x + S.doc.w*0.03, y:L.y + S.doc.h*0.03, scale:L.scale, rot:L.rot, opacity:L.opacity, blend:L.blend, flip:L.flip, shape:L.shape, feather:L.feather, sample:L.sample, lockRot:L.lockRot });
     S.layers.splice(i + 1, 0, D); S.sel = D.id;
   });
   act('aDel', L => { S.layers = S.layers.filter(l => l !== L); S.sel = null; syncCanvasUI(); });

@@ -220,6 +220,14 @@ a.btn{text-decoration:none}
               <button type="button" data-fmt="jpg">JPG</button>
             </div>
           </div>
+          <div class="field full"><span>Save size</span>
+            <div class="seg" id="sizeSeg">
+              <button type="button" data-k="1">1×</button>
+              <button type="button" data-k="2">2×</button>
+              <button type="button" data-k="3">3×</button>
+            </div>
+            <span class="muted" id="outDims" style="font-size:.8rem"></span>
+          </div>
         </div>
       </section>
 
@@ -313,12 +321,14 @@ a.btn{text-decoration:none}
 (() => {
   const $ = id => document.getElementById(id);
   const view = $('view'), vctx = view.getContext('2d');
-  const MAX_SIDE = 3000;
+  // iPhone Safari can't draw canvases above ~16.7 million pixels, so that is the only limit.
+  const MAX_PIXELS = 16000000, MAX_SIDE = 8192;
+  const fitPixels = (w, h) => Math.min(1, MAX_SIDE / Math.max(w, h), Math.sqrt(MAX_PIXELS / (w * h)));
   const PRESETS = { sq:[1080,1080], portrait:[1080,1350], story:[1080,1920], land:[1920,1080] };
   const BLEND_NAMES = {'source-over':'Normal',multiply:'Multiply',screen:'Screen',overlay:'Overlay',darken:'Darken',lighten:'Lighten','color-dodge':'Colour dodge','color-burn':'Colour burn','hard-light':'Hard light','soft-light':'Soft light',difference:'Difference',exclusion:'Exclusion',hue:'Hue',saturation:'Saturation',color:'Colour',luminosity:'Luminosity'};
   const PROPS = ['id','name','src','w','h','x','y','scale','rot','opacity','blend','flip','visible','shape','feather','sample','lockRot'];
 
-  const S = { doc:{w:1080,h:1350}, bg:'#ffffff', preset:'base', fmt:'png', layers:[], sel:null };
+  const S = { doc:{w:1080,h:1350}, bg:'#ffffff', preset:'base', fmt:'png', outK:1, layers:[], sel:null };
   let uid = 1, hist = [], future = [], rafId = 0, kcss = 1, dpr = 1;
 
   /* ---------- helpers ---------- */
@@ -387,6 +397,23 @@ a.btn{text-decoration:none}
     L.cache = c; L.cacheKey = key;
     return c;
   }
+  function mipFor(L, eff){
+    const base = srcFor(L);
+    if (eff >= 0.5) return base;
+    if (L.mipBase !== base){ L.mipBase = base; L.mips = []; }
+    let img = base, i = 0, k = 1;
+    while (eff / k < 0.5 && img.width > 2 && img.height > 2){
+      k *= 0.5;
+      if (!L.mips[i]){
+        const c = mk(Math.max(1, Math.round(img.width / 2)), Math.max(1, Math.round(img.height / 2))), g = c.getContext('2d');
+        g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+        g.drawImage(img, 0, 0, c.width, c.height);
+        L.mips[i] = c;
+      }
+      img = L.mips[i++];
+    }
+    return img;
+  }
   function paint(ctx, s, bg){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
@@ -402,7 +429,7 @@ a.btn{text-decoration:none}
       ctx.translate(L.x, L.y);
       ctx.rotate(L.rot * Math.PI / 180);
       ctx.scale(L.scale * (L.flip ? -1 : 1), L.scale);
-      ctx.drawImage(srcFor(L), -L.w/2, -L.h/2);
+      ctx.drawImage(mipFor(L, L.scale * s), -L.w/2, -L.h/2, L.w, L.h);
       ctx.restore();
     }
   }
@@ -560,7 +587,13 @@ a.btn{text-decoration:none}
     $('bgSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.bg === S.bg)));
     if (S.bg !== 'transparent') $('bgColor').value = S.bg;
     $('fmtSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.fmt === S.fmt)));
+    $('sizeSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.k === S.outK)));
+    const o = outSize(); $('outDims').textContent = 'Saves at ' + o.w + ' × ' + o.h + ' px' + (o.capped ? ' (largest this device can save)' : '');
     $('emptyStage').hidden = S.layers.length > 0;
+  }
+  function outSize(){
+    const k = Math.min(S.outK, S.outK * fitPixels(S.doc.w * S.outK, S.doc.h * S.outK));
+    return { k, w:Math.round(S.doc.w * k), h:Math.round(S.doc.h * k), capped: k < S.outK - 1e-6 };
   }
   function refreshAll(docChanged){
     if (docChanged) layout();
@@ -576,7 +609,7 @@ a.btn{text-decoration:none}
   /* ---------- adding photos ---------- */
   function toCanvas(img){
     const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-    const k = Math.min(1, MAX_SIDE / Math.max(w, h));
+    const k = fitPixels(w, h);
     const c = mk(Math.max(1, Math.round(w*k)), Math.max(1, Math.round(h*k)));
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     return c;
@@ -793,6 +826,7 @@ a.btn{text-decoration:none}
     const rx = nw / S.doc.w, ry = nh / S.doc.h, k = Math.min(rx, ry);
     for (const L of S.layers){ L.x *= rx; L.y *= ry; L.scale *= k; }
     S.doc = { w:nw, h:nh }; S.preset = p;
+    S.outK = p === 'base' ? 1 : 3;  // presets are only 1080 px wide, so save them larger by default
     if (S.layers[0]) fitLayer(S.layers[0], 'fill');
     refreshAll(true);
   });
@@ -800,6 +834,7 @@ a.btn{text-decoration:none}
   let colorPushed = false;
   $('bgColor').addEventListener('input', e => { if (!colorPushed){ push(); colorPushed = true; } S.bg = e.target.value; syncCanvasUI(); req(); });
   $('bgColor').addEventListener('change', () => { colorPushed = false; });
+  $('sizeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.outK = +b.dataset.k; syncCanvasUI(); });
   $('fmtSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.fmt = b.dataset.fmt; syncCanvasUI(); });
   $('undo').addEventListener('click', undo);
   $('redo').addEventListener('click', redo);
@@ -818,11 +853,12 @@ a.btn{text-decoration:none}
 
   /* ---------- saving ---------- */
   function exportBlob(){
-    const c = mk(S.doc.w, S.doc.h), ctx = c.getContext('2d');
+    const o = outSize();
+    const c = mk(o.w, o.h), ctx = c.getContext('2d');
     const jpg = S.fmt === 'jpg';
     const bg = S.bg === 'transparent' ? (jpg ? '#ffffff' : null) : S.bg;
-    paint(ctx, 1, bg);
-    return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode')), jpg ? 'image/jpeg' : 'image/png', 0.92));
+    paint(ctx, o.k, bg);
+    return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode')), jpg ? 'image/jpeg' : 'image/png', 0.95));
   }
   const stamp = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + z(d.getMonth()+1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()); };
   let outURL = '', outFile = null;

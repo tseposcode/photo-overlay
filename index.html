@@ -310,7 +310,7 @@ a.btn{text-decoration:none}
     <div class="card-h"><h2 id="modalTitle">Your image</h2><button class="btn" id="closeModal">Close</button></div>
     <img id="outImg" alt="Exported composition">
     <div class="sheet-actions">
-      <button class="btn primary" id="shareBtn" type="button" hidden>Save or share</button>
+      <button class="btn primary" id="shareBtn" type="button" hidden>Share</button>
       <a class="btn" id="dlLink" href="#" download>Download</a>
     </div>
     <p class="muted small" id="saveTip"></p>
@@ -889,8 +889,13 @@ a.btn{text-decoration:none}
       if (navigator.canShare && navigator.canShare({ files:[f] })) outFile = f;
     } catch(_){}
     $('shareBtn').hidden = !outFile;
-    $('saveTip').textContent = outFile
-      ? 'Tap Save or share, then choose Save Image. You can also press and hold the picture.'
+    // Safari's share button often leaves out "Save Image" (a long-standing WebKit bug),
+    // but pressing and holding the picture always offers "Save to Photos".
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    $('saveTip').textContent = ios
+      ? 'To save to Photos: press and hold the picture above, then tap “Save to Photos”. Use Share to send it to an app.'
+      : outFile
+      ? 'Tap Share, or press and hold the picture to save it.'
       : 'Tap Download, or press and hold (right-click) the picture to save it.';
     $('modal').hidden = false;
   }

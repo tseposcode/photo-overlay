@@ -115,6 +115,10 @@ input[type=range]{width:100%;min-width:0;accent-color:var(--accent);margin:0;hei
 .actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
 .actions .btn{padding:6px 8px;font-size:.86rem}
 .empty-note{color:var(--muted);font-size:.88rem}
+.nudge{display:grid;grid-template-columns:82px 38px minmax(0,1fr) 38px;align-items:center;gap:8px}
+.nudge>span{color:var(--muted);font-size:.86rem}
+.nudge output{font-family:var(--f-mono);font-size:.8rem;text-align:center;font-variant-numeric:tabular-nums}
+.nudge .btn{padding:0;font-size:1.15rem;font-weight:600;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 .align{display:flex;flex-direction:column;gap:6px}
 .align>span{color:var(--muted);font-size:.86rem}
 .align-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
@@ -226,6 +230,8 @@ a.btn{text-decoration:none}
           <div class="ctl"><label for="opacity">Opacity</label><input id="opacity" type="range" min="0" max="100" step="1"><output id="opacityOut">100%</output></div>
           <div class="ctl"><label for="size">Size</label><input id="size" type="range" min="2" max="300" step="1"><output id="sizeOut">60%</output></div>
           <div class="ctl"><label for="rotate">Rotation</label><input id="rotate" type="range" min="-180" max="180" step="1"><output id="rotateOut">0°</output></div>
+          <div class="nudge"><span>Horizontal</span><button type="button" class="btn" id="nxM" aria-label="Move left">−</button><output id="posX">0</output><button type="button" class="btn" id="nxP" aria-label="Move right">+</button></div>
+          <div class="nudge"><span>Vertical</span><button type="button" class="btn" id="nyM" aria-label="Move up">−</button><output id="posY">0</output><button type="button" class="btn" id="nyP" aria-label="Move down">+</button></div>
           <div class="ctl-row"><span>Lock rotation</span>
             <div class="seg" id="lockSeg"><button type="button" data-lock="0" aria-pressed="true">Unlocked</button><button type="button" data-lock="1" aria-pressed="false">Locked</button></div>
           </div>
@@ -492,6 +498,7 @@ a.btn{text-decoration:none}
     const sizePct = Math.round(L.w * L.scale / S.doc.w * 100);
     $('opacity').value = Math.round(L.opacity * 100); $('opacityOut').textContent = Math.round(L.opacity*100) + '%';
     $('size').value = clamp(sizePct, 2, 300); $('sizeOut').textContent = sizePct + '%';
+    $('posX').textContent = Math.round(L.x) + ' px'; $('posY').textContent = Math.round(L.y) + ' px';
     $('rotate').disabled = !!L.lockRot;
     $('lockSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lock === (L.lockRot ? '1' : '0'))));
     $('rotate').value = Math.round(L.rot); $('rotateOut').textContent = Math.round(L.rot) + '°';
@@ -733,6 +740,27 @@ a.btn{text-decoration:none}
   slider('opacity', (L, v) => { L.opacity = v / 100; });
   slider('size', (L, v) => { L.scale = clampScale(L, v / 100 * S.doc.w / L.w); });
   slider('rotate', (L, v) => { if (!L.lockRot) L.rot = v; });
+  // Position nudge: tap moves 1 px; hold to repeat, speeding up the longer you hold.
+  function nudgeBtn(id, dx, dy){
+    const el = $(id); let t = 0, n = 0;
+    const step = () => {
+      const L = cur(); if (!L) return stop();
+      const k = n < 10 ? 1 : n < 30 ? 5 : 20;
+      L.x += dx * k; L.y += dy * k; n++;
+      syncPanel(); req();
+      t = setTimeout(step, n === 1 ? 400 : 50);
+    };
+    const stop = () => { if (t){ clearTimeout(t); t = 0; } if (n){ n = 0; renderList(); } };
+    el.addEventListener('pointerdown', e => {
+      if (e.button > 0 || !cur()) return;
+      e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch(_){}
+      stop(); push(); step();
+    });
+    ['pointerup','pointercancel','lostpointercapture'].forEach(ev => el.addEventListener(ev, stop));
+    el.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && cur()){ e.preventDefault(); push(); const L = cur(); L.x += dx; L.y += dy; syncPanel(); req(); } });
+    el.addEventListener('contextmenu', e => e.preventDefault());
+  }
+  nudgeBtn('nxM', -1, 0); nudgeBtn('nxP', 1, 0); nudgeBtn('nyM', 0, -1); nudgeBtn('nyP', 0, 1);
   $('lockSeg').addEventListener('click', e => { const b = e.target.closest('button'); const L = cur(); if (!b || !L) return; const on = b.dataset.lock === '1'; if (!!L.lockRot === on) return; push(); L.lockRot = on; syncPanel(); renderList(); });
   slider('feather', (L, v) => { L.feather = v; });
   $('blend').addEventListener('change', e => { const L = cur(); if (!L) return; push(); L.blend = e.target.value; renderList(); req(); });

@@ -143,7 +143,7 @@ input[type=range]{width:100%;min-width:0;accent-color:var(--accent);margin:0;hei
 .lbtns svg{width:17px;height:17px}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));
-  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.88rem;max-width:calc(100% - 32px);z-index:20;text-align:center}
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:.88rem;width:max-content;max-width:min(420px,calc(100% - 32px));z-index:40;text-align:center}
 .modal{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;z-index:30;
   padding:calc(16px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .sheet{background:var(--panel);border-radius:14px;padding:16px;max-width:560px;width:100%;max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:10px}
@@ -852,13 +852,29 @@ a.btn{text-decoration:none}
   });
 
   /* ---------- saving ---------- */
-  function exportBlob(){
+  // iPhones cap how much canvas memory a page may use. If the full size fails,
+  // try again smaller instead of giving up, and always free the big canvas afterwards.
+  async function exportBlob(){
     const o = outSize();
-    const c = mk(o.w, o.h), ctx = c.getContext('2d');
     const jpg = S.fmt === 'jpg';
     const bg = S.bg === 'transparent' ? (jpg ? '#ffffff' : null) : S.bg;
-    paint(ctx, o.k, bg);
-    return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode')), jpg ? 'image/jpeg' : 'image/png', 0.95));
+    for (const f of [1, 0.75, 0.5, 0.35]){
+      const k = o.k * f, w = Math.round(S.doc.w * k), h = Math.round(S.doc.h * k);
+      if (f < 1 && Math.max(w, h) < 600) break;
+      let c = null;
+      try {
+        c = mk(w, h);
+        const ctx = c.getContext('2d');
+        if (!ctx) throw new Error('ctx');
+        paint(ctx, k, bg);
+        const blob = await new Promise(res => c.toBlob(res, jpg ? 'image/jpeg' : 'image/png', 0.95));
+        if (blob && blob.size > 0) return { blob, w, h, reduced: f < 1 };
+      } catch(_){}
+      finally { if (c){ c.width = 1; c.height = 1; } }
+      for (const L of S.layers){ L.mips = null; L.mipBase = null; }  // free memory before retrying
+      await new Promise(r => setTimeout(r, 60));
+    }
+    throw new Error('encode');
   }
   const stamp = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return d.getFullYear() + z(d.getMonth()+1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()); };
   let outURL = '', outFile = null;
@@ -888,8 +904,12 @@ a.btn{text-decoration:none}
   $('save').addEventListener('click', async () => {
     if (!S.layers.length){ toast('Add a photo first.'); return; }
     const btn = $('save'); btn.disabled = true; btn.textContent = 'Preparing…';
-    try { const blob = await exportBlob(); showExport(blob, 'overlay-' + stamp() + '.' + (S.fmt === 'jpg' ? 'jpg' : 'png')); }
-    catch(e){ toast('Couldn’t create the image. Try a smaller canvas size.'); }
+    try {
+      const r = await exportBlob();
+      showExport(r.blob, 'overlay-' + stamp() + '.' + (S.fmt === 'jpg' ? 'jpg' : 'png'));
+      if (r.reduced) $('saveTip').textContent = 'Your phone ran low on memory, so this is ' + r.w + ' × ' + r.h + ' px instead of the full size. ' + $('saveTip').textContent;
+    }
+    catch(e){ toast('Couldn’t create the image. Choose a smaller Save size and try again.'); }
     finally { btn.disabled = false; btn.textContent = 'Save image'; }
   });
 

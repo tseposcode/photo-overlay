@@ -1,5 +1,5 @@
 // Photo Overlay Studio: offline support. Bump VERSION when you change any file.
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE = 'photo-overlay-' + VERSION;
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
